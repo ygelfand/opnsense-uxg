@@ -105,7 +105,7 @@ func run() error {
 		if _, err := store.Load(); err != nil {
 			return fmt.Errorf("gateway %q: %w", g.Identity.ID, err)
 		}
-		publisher := &unifi.Publisher{Identity: g.Identity, Bindings: g.Bindings, URL: g.Controller.URL, Client: httpClient, StartedAt: time.Now()}
+		publisher := &unifi.Publisher{Identity: g.Identity, Bindings: g.Bindings, UplinkInterface: g.UplinkInterface, URL: g.Controller.URL, Client: httpClient, StartedAt: time.Now()}
 		worker := &usecase.Worker{ID: g.Identity.ID, Source: source, Publisher: publisher, Store: store, Interval: g.Controller.Interval, Timeout: g.Source.Timeout + g.Controller.Timeout}
 		worker.Bindings = g.Bindings
 		if g.HA != nil {
@@ -322,7 +322,7 @@ func collectOne(ctx context.Context, g config.Gateway, source domain.Source, dry
 	if err != nil {
 		return err
 	}
-	b, err := unifi.Render(g.Identity, g.Bindings, snap, state, reportedURL, time.Second)
+	b, err := unifi.Render(g.Identity, g.Bindings, g.UplinkInterface, snap, state, reportedURL, time.Second)
 	if err != nil {
 		return err
 	}

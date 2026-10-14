@@ -69,7 +69,7 @@ func TestObservedStateAndUnknownMeasurements(t *testing.T) {
 	if len(snap.Interfaces) != 2 || snap.Interfaces[0].Counters.RXBytes == nil || *snap.Interfaces[0].Counters.RXBytes != 0 {
 		t.Fatalf("measured zero counter lost: %+v", snap)
 	}
-	b, err := unifi.Render(identity(), bindings(), snap, domain.Adoption{MAC: identity().MAC}, "http://192.0.2.100:8080/inform", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{MAC: identity().MAC}, "http://192.0.2.100:8080/inform", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestObservedStateAndUnknownMeasurements(t *testing.T) {
 	if _, ok := ports[0]["rx_bytes"]; ok {
 		t.Fatal("unknown port counter became a measurement")
 	}
-	if _, err := unifi.Render(identity(), []domain.Binding{{Port: 1, Interface: "missing", Role: "lan"}}, snap, domain.Adoption{}, "", time.Minute); err == nil {
+	if _, err := unifi.Render(identity(), []domain.Binding{{Port: 1, Interface: "missing", Role: "lan"}}, "", snap, domain.Adoption{}, "", time.Minute); err == nil {
 		t.Error("missing mapped interface accepted")
 	}
 }

@@ -72,7 +72,7 @@ type hostRow struct {
 
 // Render projects mapped observed interfaces into the captured UXG table shapes.
 // Missing mapped interfaces fail the cycle so a disappearing NIC stays visible.
-func Render(id domain.Identity, bindings []domain.Binding, snap domain.Snapshot, adoption domain.Adoption, informURL string, uptime time.Duration) ([]byte, error) {
+func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface string, snap domain.Snapshot, adoption domain.Adoption, informURL string, uptime time.Duration) ([]byte, error) {
 	if snap.SourceID != id.ID {
 		return nil, fmt.Errorf("snapshot belongs to another source")
 	}
@@ -207,6 +207,13 @@ func Render(id domain.Identity, bindings []domain.Binding, snap domain.Snapshot,
 		"ethernet_overrides": assignments, "config_port_table": assignments,
 		"udapi_version": map[string]any{"version": 48},
 		"udapi_caps":    0,
+	}
+	if uplinkInterface != "" {
+		uplink, role := logicalInterfaceRole(uplinkInterface, bindings, snap.VLANs)
+		if uplink == "" || role != "lan" && role != "lan2" {
+			return nil, fmt.Errorf("uplink interface %q is not mapped to a bound LAN interface", uplinkInterface)
+		}
+		root["uplink"] = uplink
 	}
 	if snap.System.UptimeSeconds != nil {
 		root["uptime"] = *snap.System.UptimeSeconds
@@ -367,11 +374,16 @@ func clientNetworks(rows []networkRow, snap domain.Snapshot, bindings []domain.B
 }
 
 func logicalInterface(iface string, bindings []domain.Binding, vlans []domain.VLAN) string {
+	name, _ := logicalInterfaceRole(iface, bindings, vlans)
+	return name
+}
+
+func logicalInterfaceRole(iface string, bindings []domain.Binding, vlans []domain.VLAN) (string, string) {
 	var tags []int
 	visited := map[string]bool{}
 	for depth := 0; depth < 16; depth++ {
 		if visited[iface] {
-			return ""
+			return "", ""
 		}
 		visited[iface] = true
 		for _, binding := range bindings {
@@ -380,7 +392,7 @@ func logicalInterface(iface string, bindings []domain.Binding, vlans []domain.VL
 				for i := len(tags) - 1; i >= 0; i-- {
 					name += "." + strconv.Itoa(tags[i])
 				}
-				return name
+				return name, binding.Role
 			}
 		}
 		found := false
@@ -393,10 +405,10 @@ func logicalInterface(iface string, bindings []domain.Binding, vlans []domain.VL
 			}
 		}
 		if !found {
-			return ""
+			return "", ""
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func wireRate(value *float64) *int64 {

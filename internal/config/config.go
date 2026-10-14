@@ -31,10 +31,12 @@ type Gateway struct {
 	Source     Source           `yaml:"source"`
 	Controller Controller       `yaml:"controller"`
 	Bindings   []domain.Binding `yaml:"bindings"`
-	Routes     RoutePolicy      `yaml:"routes"`
-	ClientTTL  time.Duration    `yaml:"client_ttl"`
-	Discovery  Discovery        `yaml:"discovery"`
-	Control    Control          `yaml:"control"`
+	// UplinkInterface selects a source LAN interface or VLAN for UniFi's uplink field.
+	UplinkInterface string        `yaml:"uplink_interface"`
+	Routes          RoutePolicy   `yaml:"routes"`
+	ClientTTL       time.Duration `yaml:"client_ttl"`
+	Discovery       Discovery     `yaml:"discovery"`
+	Control         Control       `yaml:"control"`
 }
 
 // HA opts a reciprocal Enterprise pair into read-only managed-shadow reporting.
@@ -278,6 +280,9 @@ func (c Config) Validate() error {
 				return fmt.Errorf("duplicate role %q", b.Role)
 			}
 			roles[b.Role] = true
+		}
+		if g.UplinkInterface != "" && !roles["lan"] && !roles["lan2"] {
+			return fmt.Errorf("gateway %q uplink_interface requires a LAN binding", id.ID)
 		}
 		if api := g.Controller.API; api != nil {
 			if len(api.DisabledPorts) > 0 && !api.SyncWANs && !api.SyncVLANs {

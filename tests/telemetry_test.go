@@ -73,7 +73,7 @@ func TestApplianceTelemetryAndWANProjection(t *testing.T) {
 	if len(snap.CARP) != 2 || snap.CARP[0].State != "MASTER" || snap.CARP[1].State != "BACKUP" || snap.CARP[1].Address != "2001:db8::ff" || snap.CARP[0].VHID == nil || *snap.CARP[0].VHID != 10 {
 		t.Fatal("per-VIP CARP observations were lost or collapsed into a global role")
 	}
-	b, err := unifi.Render(identity(), bindings(), snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestOptionalTelemetryFailureClearsMeasurements(t *testing.T) {
 	if snap.System.CPUPercent != nil || snap.System.UptimeSeconds != nil || len(snap.Gateways) > 0 {
 		t.Error("failed endpoints produced measurements")
 	}
-	b, err := unifi.Render(identity(), bindings(), snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

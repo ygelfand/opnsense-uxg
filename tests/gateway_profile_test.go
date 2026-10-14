@@ -21,7 +21,7 @@ func TestGatewayProfileMapsWANAndLANWithoutClaimingWriteCapabilities(t *testing.
 		{Name: "igc1", Addresses: []string{"198.51.100.1/24"}},
 	}}
 	bindings := []domain.Binding{{Port: 1, Interface: "igc0", Role: "wan"}, {Port: 2, Interface: "igc1", Role: "lan"}}
-	body, err := unifi.Render(id, bindings, snap, domain.Adoption{MAC: id.MAC}, "https://192.0.2.100:8080/inform", time.Second)
+	body, err := unifi.Render(id, bindings, "", snap, domain.Adoption{MAC: id.MAC}, "https://192.0.2.100:8080/inform", time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestEnterpriseProfileUsesSixPortsAndEnterpriseSchema(t *testing.T) {
 	id.Model = "UXGENT"
 	snap := domain.Snapshot{SourceID: id.ID, ObservedAt: time.Now(), Interfaces: []domain.Interface{{Name: "wan-a"}, {Name: "wan-b"}}}
 	bindings := []domain.Binding{{Port: 1, Interface: "wan-a", Role: "wan"}, {Port: 5, Interface: "wan-b", Role: "wan2"}}
-	b, err := unifi.Render(id, bindings, snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
+	b, err := unifi.Render(id, bindings, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,14 +17,16 @@ import (
 
 // Publisher represents a single virtual UXG protocol session.
 type Publisher struct {
-	Identity    domain.Identity
-	Bindings    []domain.Binding
-	URL         string
-	Client      *http.Client
-	StartedAt   time.Time
-	Now         func() time.Time
-	commands    commandCache
-	reportedURL string
+	Identity domain.Identity
+	Bindings []domain.Binding
+	// UplinkInterface is the configured source interface reported to UniFi.
+	UplinkInterface string
+	URL             string
+	Client          *http.Client
+	StartedAt       time.Time
+	Now             func() time.Time
+	commands        commandCache
+	reportedURL     string
 }
 
 type packetDecodeError struct{ err error }
@@ -47,7 +49,7 @@ func (p *Publisher) Publish(ctx context.Context, snap domain.Snapshot, state dom
 		}
 		p.reportedURL = resolved
 	}
-	payload, err := Render(p.Identity, p.Bindings, snap, state, p.reportedURL, now().Sub(p.StartedAt))
+	payload, err := Render(p.Identity, p.Bindings, p.UplinkInterface, snap, state, p.reportedURL, now().Sub(p.StartedAt))
 	if err != nil {
 		return domain.Exchange{}, err
 	}

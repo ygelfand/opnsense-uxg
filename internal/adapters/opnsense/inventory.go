@@ -2,7 +2,9 @@ package opnsense
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -209,6 +211,11 @@ func safeID(value string) bool {
 
 func queryEscape(value string) string { return url.QueryEscape(value) }
 
+type flowTotals struct {
+	rx float64
+	tx float64
+}
+
 // FlowTraffic queries one observation point per interface, retaining window totals.
 func (c *Client) FlowTraffic(ctx context.Context, cfg AccountingOptions, now time.Time) ([]domain.ClientTraffic, error) {
 	from, to := accountingWindow(cfg, now)
@@ -216,9 +223,9 @@ func (c *Client) FlowTraffic(ctx context.Context, cfg AccountingOptions, now tim
 	for _, iface := range cfg.Interfaces {
 		path := "/diagnostics/networkinsight/top/FlowSourceAddrDetails/" + strconv.FormatInt(from.Unix(), 10) + "/" + strconv.FormatInt(to.Unix(), 10) + "/src_addr,dst_addr/octets/" + strconv.Itoa(cfg.MaxRows) + "/?filter_field=if&filter_value=" + queryEscape(iface)
 		var rows []struct {
-			Source      string     `json:"src_addr"`
-			Destination string     `json:"dst_addr"`
-			Octets      *api.Int64 `json:"total"`
+			Source      string          `json:"src_addr"`
+			Destination string          `json:"dst_addr"`
+			Octets      json.RawMessage `json:"total"`
 		}
 		if err := c.request(ctx, httpGET, path, nil, &rows); err != nil {
 			return nil, err
@@ -226,8 +233,8 @@ func (c *Client) FlowTraffic(ctx context.Context, cfg AccountingOptions, now tim
 		if rows == nil || len(rows) >= cfg.MaxRows {
 			return nil, fmt.Errorf("flow query is unavailable or truncated")
 		}
-		traffic := map[string]*domain.ClientTraffic{}
-		add := func(ip string, value uint64, rx bool) error {
+		traffic := map[string]*flowTotals{}
+		add := func(ip string, value float64, rx bool) error {
 			addr, err := netip.ParseAddr(ip)
 			if err != nil {
 				return fmt.Errorf("flow query returned invalid address")
@@ -235,36 +242,44 @@ func (c *Client) FlowTraffic(ctx context.Context, cfg AccountingOptions, now tim
 			ip = addr.String()
 			v := traffic[ip]
 			if v == nil {
-				v = &domain.ClientTraffic{IP: ip, Interface: iface, From: from, To: to, Attribution: "current_ip_association"}
+				v = &flowTotals{}
 				traffic[ip] = v
 			}
-			counter := &v.TXBytes
+			counter := &v.tx
 			if rx {
-				counter = &v.RXBytes
+				counter = &v.rx
 			}
-			if *counter == nil {
-				zero := uint64(0)
-				*counter = &zero
-			}
-			if ^uint64(0)-**counter < value {
+			if value < 0 || math.IsInf(*counter+value, 0) || *counter+value >= math.Ldexp(1, 64) {
 				return fmt.Errorf("flow counter overflow")
 			}
-			**counter += value
+			*counter += value
 			return nil
 		}
 		for _, row := range rows {
-			if row.Octets == nil || *row.Octets < 0 {
-				return nil, fmt.Errorf("flow query omitted octets")
-			}
-			if err := add(row.Source, uint64(*row.Octets), false); err != nil {
+			value, err := parseFlowOctets(row.Octets)
+			if err != nil {
 				return nil, err
 			}
-			if err := add(row.Destination, uint64(*row.Octets), true); err != nil {
+			if err := add(row.Source, value, false); err != nil {
+				return nil, err
+			}
+			if err := add(row.Destination, value, true); err != nil {
 				return nil, err
 			}
 		}
-		for _, row := range traffic {
-			out = append(out, *row)
+		for ip, totals := range traffic {
+			rx, err := roundedFlowOctets(totals.rx)
+			if err != nil {
+				return nil, err
+			}
+			tx, err := roundedFlowOctets(totals.tx)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, domain.ClientTraffic{
+				IP: ip, Interface: iface, From: from, To: to,
+				Attribution: "current_ip_association", RXBytes: &rx, TXBytes: &tx,
+			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -275,6 +290,30 @@ func (c *Client) FlowTraffic(ctx context.Context, cfg AccountingOptions, now tim
 		return a.IP < b.IP
 	})
 	return out, nil
+}
+
+func parseFlowOctets(raw json.RawMessage) (float64, error) {
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err != nil {
+		var text string
+		if string(raw) == "null" || json.Unmarshal(raw, &text) != nil {
+			return 0, fmt.Errorf("flow query omitted octets")
+		}
+		number = json.Number(text)
+	}
+	value, err := strconv.ParseFloat(number.String(), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, fmt.Errorf("flow query returned invalid octets")
+	}
+	return value, nil
+}
+
+func roundedFlowOctets(value float64) (uint64, error) {
+	rounded := math.Round(value)
+	if math.IsNaN(rounded) || math.IsInf(rounded, 0) || rounded < 0 || rounded >= math.Ldexp(1, 64) {
+		return 0, fmt.Errorf("flow counter overflow")
+	}
+	return uint64(rounded), nil
 }
 
 func validateObservationPoints(points []string, interfaces []domain.Interface, vlans []domain.VLAN) error {

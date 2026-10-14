@@ -48,7 +48,7 @@ func TestInventoryClientAssociationAndFlowProjection(t *testing.T) {
 				if r.URL.Query().Get("filter_field") != "if" || r.URL.Query().Get("filter_value") != "vlan10" {
 					t.Error("flow query lost its observation-point filter")
 				}
-				body = `[{"src_addr":"198.51.100.10","dst_addr":"203.0.113.5","total":"1500"},{"src_addr":"203.0.113.5","dst_addr":"198.51.100.10","total":3000}]`
+				body = `[{"src_addr":"198.51.100.10","dst_addr":"203.0.113.5","total":"1500.25"},{"src_addr":"203.0.113.5","dst_addr":"198.51.100.10","total":3000.75}]`
 			} else {
 				t.Errorf("unexpected inventory endpoint %s", r.URL)
 				http.NotFound(w, r)
@@ -88,10 +88,10 @@ func TestInventoryClientAssociationAndFlowProjection(t *testing.T) {
 	if leased == nil || leased.Presence != "lease_only" {
 		t.Fatalf("lease incorrectly marked observed = %+v", leased)
 	}
-	if len(observed.Traffic) != 1 || observed.Traffic[0].RXBytes == nil || *observed.Traffic[0].RXBytes != 3000 || *observed.Traffic[0].TXBytes != 1500 || observed.Traffic[0].To.Sub(observed.Traffic[0].From) != 5*time.Minute {
+	if len(observed.Traffic) != 1 || observed.Traffic[0].RXBytes == nil || *observed.Traffic[0].RXBytes != 3001 || *observed.Traffic[0].TXBytes != 1500 || observed.Traffic[0].To.Sub(observed.Traffic[0].From) != 5*time.Minute {
 		t.Fatalf("client window totals = %+v", observed.Traffic)
 	}
-	b, err := unifi.Render(identity(), bindings(), snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestDirectVLANBindingsOverrideParentRoles(t *testing.T) {
 	}
 	id := identity()
 	id.Model = "UXGPRO"
-	b, err := unifi.Render(id, mapping, snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(id, mapping, "", snap, domain.Adoption{}, "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

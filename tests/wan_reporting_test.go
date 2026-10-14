@@ -22,7 +22,7 @@ func TestDualWANReportsKeepUnknownAndDisconnectedDistinct(t *testing.T) {
 		{Name: "wan-a", Up: &link, Addresses: []string{"192.0.2.2/24"}, Counters: domain.Counters{RXBytes: &bytes}, Rates: domain.Rates{RXBytesPerSecond: &rate}},
 		{Name: "wan-b", Addresses: []string{"198.51.100.2/24", "2001:db8::2/64"}},
 	}, Gateways: []domain.GatewayMonitor{{Role: "wan", Connected: &connected, LatencyMS: &latency}}}
-	b, err := unifi.Render(id, bindings, snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
+	b, err := unifi.Render(id, bindings, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +80,48 @@ func TestDualWANReportsKeepUnknownAndDisconnectedDistinct(t *testing.T) {
 	}
 }
 
+func TestConfiguredLANVLANIsReportedAsGatewayUplink(t *testing.T) {
+	t.Parallel()
+	id := identity()
+	bindings := []domain.Binding{
+		{Port: 1, Interface: "vtnet0", Role: "lan"},
+		{Port: 5, Interface: "wan-a", Role: "wan"},
+		{Port: 6, Interface: "wan-b", Role: "wan2"},
+	}
+	snap := domain.Snapshot{
+		SourceID:   id.ID,
+		ObservedAt: time.Now(),
+		Interfaces: []domain.Interface{
+			{Name: "vtnet0"},
+			{Name: "vlan0.99", Addresses: []string{"192.0.2.99/24"}},
+			{Name: "wan-a"},
+			{Name: "wan-b"},
+		},
+		VLANs: []domain.VLAN{{Interface: "vlan0.99", Parent: "vtnet0", Tag: 99}},
+	}
+	payload, err := unifi.Render(id, bindings, "vlan0.99", snap, domain.Adoption{}, "", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(payload, &root); err != nil {
+		t.Fatal(err)
+	}
+	if got := root["uplink"]; got != "eth0.99" {
+		t.Errorf("Render uplink = %v, want eth0.99", got)
+	}
+	if got := root["ip"]; got != id.ManagementIP {
+		t.Errorf("Render ip = %v, want configured management IP %s", got, id.ManagementIP)
+	}
+}
+
 func TestWANMonitorHealthProjectsCurrentProbeResults(t *testing.T) {
 	t.Parallel()
 	for _, connected := range []bool{true, false} {
 		id := identity()
 		loss, latency := 2.5, 7.0
 		snap := domain.Snapshot{SourceID: id.ID, ObservedAt: time.Now(), Interfaces: []domain.Interface{{Name: "uplink"}}, Gateways: []domain.GatewayMonitor{{Role: "wan", Connected: &connected, LossPercent: &loss, LatencyMS: &latency}}}
-		b, err := unifi.Render(id, []domain.Binding{{Port: 1, Interface: "uplink", Role: "wan"}}, snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
+		b, err := unifi.Render(id, []domain.Binding{{Port: 1, Interface: "uplink", Role: "wan"}}, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
