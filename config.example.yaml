@@ -1,0 +1,51 @@
+state_dir: state
+gateways:
+  - identity:
+      id: edge-a
+      mac: "02:00:00:00:01:01"
+      hostname: opnsense-edge-a
+      model: UXG
+      management_ip: 192.0.2.10
+    source:
+      url: https://192.0.2.10
+      key_env: OPN_A_KEY
+      secret_env: OPN_A_SECRET
+      statistics: true
+      system: true
+      cpu: true
+      # Optional: insecure_skip_verify: true for this source's TLS connection.
+      # Optional: gateway_monitors: {wan: WAN_DHCP, wan2: WAN2_DHCP}
+      neighbors: true
+      dhcp_backends: [kea4]
+      vlans: true
+      # ca_file: /etc/opnsense-uxg/opnsense-ca.pem
+    controller:
+      provisioning: monitor
+      # Optional: api: {sync_wans: true, sync_vlans: true, url_env: UNIFI_URL, key_env: UNIFI_API_KEY}
+      url: http://192.0.2.100:8080/inform
+    bindings:
+      - {port: 1, interface: vtnet0, role: wan}
+      - {port: 2, interface: vtnet1, role: lan}
+  - identity:
+      id: edge-b
+      mac: "02:00:00:00:01:02"
+      hostname: opnsense-edge-b
+      model: UXGPRO
+      management_ip: 192.0.2.20
+    source:
+      url: https://192.0.2.20
+      key_env: OPN_B_KEY
+      secret_env: OPN_B_SECRET
+      statistics: true
+      system: true
+      cpu: true
+      neighbors: true
+      dhcp_backends: [dnsmasq]
+      vlans: true
+    controller:
+      provisioning: monitor
+      # Use the same controller; adopt this gateway into another site.
+      url: http://192.0.2.100:8080/inform
+    bindings:
+      - {port: 1, interface: igc0, role: wan}
+      - {port: 2, interface: igc1, role: lan}

@@ -1,0 +1,13 @@
+version: "2"
+formatters:
+  enable:
+    - gofmt
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - bodyclose
+    - nolintlint

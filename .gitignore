@@ -1,0 +1,7 @@
+/dist/
+/state/
+/config.yaml
+/captures/
+/collect_*.json
+/fw*_config.xml
+*.local.yaml
