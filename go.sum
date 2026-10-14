@@ -1,5 +1,3 @@
-github.com/browningluke/opnsense-go v0.25.0 h1:OQ+DOmHszW0yewHx+FHqDwS4wUwAUJ4bd0/cEM8Bht4=
-github.com/browningluke/opnsense-go v0.25.0/go.mod h1:zh2ofl18Q4soldkfczxgbHddNU7NoCDyIuutVN6sOrM=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
 github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=
 github.com/golang/snappy v1.0.0 h1:Oy607GVXHs7RtbggtPBnr2RmDArIsAefDwvrdWvRhGs=
@@ -16,6 +14,8 @@ github.com/mattn/go-colorable v0.1.13 h1:fFA4WZxdEF4tXPZVKMLwD8oUnCTTo08duU7wxec
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
+github.com/ygelfand/opnsense-go v0.0.0-20261014121528-b0d55b7f7929 h1:hD8m03Jl6FwIU8ddMS1COOdmPEVzNiKYdwUV2kz8q30=
+github.com/ygelfand/opnsense-go v0.0.0-20261014121528-b0d55b7f7929/go.mod h1:zh2ofl18Q4soldkfczxgbHddNU7NoCDyIuutVN6sOrM=
 golang.org/x/sys v0.42.0 h1:omrd2nAlyT5ESRdCLYdm3+fMfNFE/+Rf4bDIQImRJeo=
 golang.org/x/sys v0.42.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 golang.org/x/text v0.28.0 h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=

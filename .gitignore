@@ -5,3 +5,5 @@
 /collect_*.json
 /fw*_config.xml
 *.local.yaml
+/go.work
+/go.work.sum

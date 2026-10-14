@@ -1,34 +1,17 @@
 name: Check
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   check:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: opnsense-uxg
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: opnsense-uxg
-      - name: Check SDK workspace configuration
-        env:
-          SDK_REPOSITORY: ${{ vars.OPNSENSE_GO_REPOSITORY }}
-          SDK_REF: ${{ vars.OPNSENSE_GO_REF }}
-        run: |
-          if [ -z "$SDK_REPOSITORY" ] || [ -z "$SDK_REF" ]; then
-            echo 'Set OPNSENSE_GO_REPOSITORY and OPNSENSE_GO_REF to the SDK fork/ref containing the workspace changes.'
-            exit 1
-          fi
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.OPNSENSE_GO_REPOSITORY }}
-          ref: ${{ vars.OPNSENSE_GO_REF }}
-          path: opnsense-go
       - uses: actions/setup-go@v5
         with:
-          go-version-file: opnsense-uxg/go.mod
+          go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
-          working-directory: opnsense-uxg
       - run: make check

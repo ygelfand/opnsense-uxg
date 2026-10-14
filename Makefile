@@ -29,11 +29,6 @@ test: ## Run tests (make test PKG=./tests/... TIMEOUT=60s)
 test-race: ## Run tests with the race detector
 	$(GO) test -race -timeout $(TIMEOUT) $(PKG)
 
-.PHONY: test-sdk
-test-sdk: ## Run the local SDK unit tests and vet (no live acceptance tests)
-	cd ../opnsense-go && $(GO) test -race -timeout $(TIMEOUT) ./pkg/api ./pkg/diagnostics ./internal/generate/...
-	cd ../opnsense-go && $(GO) vet ./pkg/api ./pkg/diagnostics ./internal/generate/...
-
 .PHONY: cover
 cover: ## Write a coverage report under dist
 	@mkdir -p $(BUILD_DIR)
@@ -66,7 +61,7 @@ validate: ## Validate the example configuration without network access
 	$(GO) run ./cmd/opnsense-uxg -validate -config config.example.yaml
 
 .PHONY: check
-check: fmt-check vet lint test-race test-sdk validate cross ## Format check, vet, lint, bridge/SDK race tests, config and cross-builds
+check: fmt-check vet lint test-race validate cross ## Format check, vet, lint, race tests, config and cross-builds
 
 ##@ Cleanup
 

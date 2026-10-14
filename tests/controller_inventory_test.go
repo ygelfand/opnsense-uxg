@@ -100,7 +100,7 @@ func inventorySnapshot() domain.Snapshot {
 }
 
 func inventoryClient(srv *httptest.Server, state *unifiapi.State) *unifiapi.Client {
-	c := &unifiapi.Client{URL: srv.URL, Key: "test-key", HTTP: srv.Client(), Identity: identity(), Bindings: []domain.Binding{{Port: 1, Interface: "source-wan", Role: "wan"}}}
+	c := &unifiapi.Client{URL: srv.URL, Key: "test-key", HTTP: srv.Client(), Identity: identity(), Bindings: []domain.Binding{{Port: 1, Interface: "source-wan", Role: "wan"}}, SyncWANs: true}
 	c.Load = func() (unifiapi.State, error) {
 		var v unifiapi.State
 		b, err := json.Marshal(state)
