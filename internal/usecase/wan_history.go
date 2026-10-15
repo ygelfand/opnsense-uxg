@@ -32,6 +32,7 @@ func (t *WANTracker) Apply(snap domain.Snapshot) domain.Snapshot {
 				row.UnknownSeconds += seconds
 			case *row.Connected:
 				row.OnlineSeconds += seconds
+				row.StreakSeconds += seconds
 			default:
 				row.OfflineSeconds += seconds
 			}
@@ -41,6 +42,9 @@ func (t *WANTracker) Apply(snap domain.Snapshot) domain.Snapshot {
 					row.Outages++
 				}
 			}
+		}
+		if next == nil || !*next {
+			row.StreakSeconds = 0
 		}
 		row.Connected = nil
 		if next != nil {

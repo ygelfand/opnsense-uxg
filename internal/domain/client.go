@@ -79,6 +79,7 @@ type WANHistory struct {
 	OnlineSeconds  float64   `json:"online_seconds"`
 	OfflineSeconds float64   `json:"offline_seconds"`
 	UnknownSeconds float64   `json:"unknown_seconds"`
+	StreakSeconds  float64   `json:"streak_seconds"`
 	Outages        int       `json:"outages"`
 	LastChangeAt   time.Time `json:"last_change_at"`
 }

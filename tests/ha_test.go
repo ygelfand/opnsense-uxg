@@ -70,7 +70,7 @@ func TestEnterpriseHAAdvertisesOnlyExplicitReportingSupport(t *testing.T) {
 	id := identity()
 	id.Model = "UXGENT"
 	snap := domain.Snapshot{SourceID: id.ID, ObservedAt: time.Now(), Interfaces: []domain.Interface{{Name: "inside"}}, HA: &domain.HAStatus{Role: "shadow", Peer: "peer", CARPState: "backup", Status: "observed"}}
-	b, err := unifi.Render(id, []domain.Binding{{Port: 2, Interface: "inside", Role: "lan"}}, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second)
+	b, err := unifi.Render(id, []domain.Binding{{Port: 2, Interface: "inside", Role: "lan"}}, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

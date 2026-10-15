@@ -110,8 +110,6 @@ func addWANReports(root map[string]any, bindings []domain.Binding, snap domain.S
 			}
 			if monitor.Connected != nil {
 				row["isWanConnected"] = *monitor.Connected
-				// UniFi uses uptime > 0 as current reachability, not elapsed seconds.
-				// Project the current monitor result; this is not historical ISP uptime.
 				availability := 0.0
 				if *monitor.Connected {
 					availability = 100
@@ -119,8 +117,20 @@ func addWANReports(root map[string]any, bindings []domain.Binding, snap domain.S
 						availability -= *monitor.LossPercent
 					}
 				}
-				result := map[string]any{"uptime": availability, "availability": availability}
-				probe := map[string]any{"availability": availability}
+				percent := int(math.Round(availability))
+				result := map[string]any{"availability": percent}
+				// UniFi 10.6.106 stores uptime and downtime as per-interval increases of cumulative seconds.
+				for _, history := range snap.WANHistory {
+					if history.Role != binding.Role {
+						continue
+					}
+					uptime := 0
+					if *monitor.Connected {
+						uptime = max(1, int(history.StreakSeconds))
+					}
+					result["uptime"], result["downtime"] = uptime, int(history.OfflineSeconds)
+				}
+				probe := map[string]any{"availability": percent}
 				if monitor.LatencyMS != nil {
 					probe["latency_average"] = int(*monitor.LatencyMS + 0.5)
 				}
@@ -149,5 +159,21 @@ func addWANReports(root map[string]any, bindings []domain.Binding, snap domain.S
 	}
 	if len(health) > 0 {
 		root["uptime_stats"] = health
+	}
+	geo := map[string]any{}
+	for _, provider := range snap.Providers {
+		entry := map[string]any{}
+		if provider.Name != "" {
+			entry["isp_name"] = provider.Name
+		}
+		if provider.ASN != 0 {
+			entry["asn"] = provider.ASN
+		}
+		if len(entry) > 0 {
+			geo[strings.ToUpper(provider.Role)] = entry
+		}
+	}
+	if len(geo) > 0 {
+		root["geo_info"] = geo
 	}
 }

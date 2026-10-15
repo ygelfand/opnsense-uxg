@@ -15,6 +15,8 @@ gateways:
       cpu: true
       # Optional: insecure_skip_verify: true for this source's TLS connection.
       # Optional: gateway_monitors: {wan: WAN_DHCP, wan2: WAN2_DHCP}
+      # Optional: isp_lookup: true
+      # Optional: isp_names: {wan: Example Provider}
       neighbors: true
       dhcp_backends: [kea4]
       vlans: true
@@ -22,6 +24,8 @@ gateways:
     controller:
       provisioning: monitor
       # Optional: api: {sync_wans: true, sync_vlans: true, url_env: UNIFI_URL, key_env: UNIFI_API_KEY}
+      # Optional: api.native_vlan: 99
+      # Optional: min_interval: 2s
       url: http://192.0.2.100:8080/inform
     bindings:
       - {port: 1, interface: vtnet0, role: wan}

@@ -47,6 +47,7 @@ type Client struct {
 	DisabledPorts []int
 	SyncWANs      bool
 	SyncVLANs     bool
+	NativeVLAN    int
 	Load          func() (State, error)
 	Save          func(State) error
 	resolvedSite  string

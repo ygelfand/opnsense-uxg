@@ -3,6 +3,7 @@ package domain
 
 import (
 	"context"
+	"net/netip"
 	"time"
 )
 
@@ -82,6 +83,16 @@ type GatewayMonitor struct {
 	LossPercent *float64 `json:"loss_percent,omitempty"`
 }
 
+// Provider names the service provider behind one WAN role.
+type Provider struct {
+	Role string `json:"role"`
+	Name string `json:"name,omitempty"`
+	ASN  uint32 `json:"asn,omitempty"`
+}
+
+// ProviderLookup resolves the provider announcing a public address.
+type ProviderLookup func(context.Context, netip.Addr) (Provider, error)
+
 // Snapshot represents a successful, fresh collection from a single appliance.
 type Snapshot struct {
 	HA                *HAStatus         `json:"ha,omitempty"`
@@ -101,6 +112,7 @@ type Snapshot struct {
 	Traffic           []ClientTraffic   `json:"traffic,omitempty"`
 	TrafficFresh      bool              `json:"traffic_fresh,omitempty"`
 	WANHistory        []WANHistory      `json:"wan_history,omitempty"`
+	Providers         []Provider        `json:"providers,omitempty"`
 }
 
 // Source collects measured state. Collection failure suppresses publication.

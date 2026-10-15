@@ -198,6 +198,9 @@ func (c *Client) Sync(ctx context.Context, snap domain.Snapshot) (domain.Invento
 	}
 	if c.SyncVLANs {
 		for _, vlan := range snap.VLANs {
+			if vlan.Tag == c.NativeVLAN {
+				continue
+			}
 			if _, duplicate := desiredVLANs[vlan.Tag]; duplicate {
 				return domain.InventorySync{}, fmt.Errorf("duplicate OPNsense VLAN tag %d", vlan.Tag)
 			}

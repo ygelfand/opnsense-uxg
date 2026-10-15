@@ -217,3 +217,46 @@ func TestControllerInventoryConflictsAndIdentityMismatchMakeNoWrites(t *testing.
 		t.Fatal("conflict or missing device caused writes")
 	}
 }
+
+func TestControllerInventoryLeavesNativeVLANToDefaultNetwork(t *testing.T) {
+	t.Parallel()
+	for _, native := range []int{0, 99} {
+		srv := &inventoryServer{networks: []map[string]any{
+			{"_id": "default", "name": "Default", "purpose": "corporate", "attr_hidden_id": "LAN", "ip_subnet": "192.0.2.1/24"},
+			{"_id": "mgmt", "name": "mgmt", "purpose": "vlan-only", "vlan": 99, "vlan_enabled": true},
+		}}
+		server := httptest.NewServer(srv.handler(t))
+		state := &unifiapi.State{Networks: map[string]unifiapi.OwnedNetwork{"VLAN:99": {ID: "mgmt", Fields: map[string]any{"purpose": "corporate", "gateway_type": "default", "vlan_enabled": true, "ip_subnet": "192.0.2.1/24", "dhcpd_enabled": false}}}}
+		client := inventoryClient(server, state)
+		client.SyncVLANs, client.NativeVLAN = true, native
+		snap := inventorySnapshot()
+		snap.SourceID = identity().ID
+		snap.Interfaces = append(snap.Interfaces, domain.Interface{Name: "vlan-a", Addresses: []string{"198.51.100.1/24"}}, domain.Interface{Name: "vlan-b", Addresses: []string{"192.0.2.1/24"}})
+		snap.VLANs = []domain.VLAN{{Interface: "vlan-a", Tag: 3}, {Interface: "vlan-b", Tag: 99}}
+		_, err := client.Sync(t.Context(), snap)
+		server.Close()
+		if native == 0 {
+			if err == nil {
+				t.Fatal("operator change to an owned VLAN was not reported as a conflict")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, network := range srv.networks {
+			if fmt.Sprint(network["vlan"]) == "99" && network["_id"] != "mgmt" || network["_id"] == "mgmt" && network["purpose"] != "vlan-only" {
+				t.Fatalf("native VLAN network was recreated or rewritten: %v", network)
+			}
+		}
+		created := 0
+		for _, network := range srv.networks {
+			if fmt.Sprint(network["vlan"]) == "3" {
+				created++
+			}
+		}
+		if created != 1 {
+			t.Fatalf("tagged VLAN 3 created %d times", created)
+		}
+	}
+}

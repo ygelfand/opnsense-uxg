@@ -65,6 +65,8 @@ type Source struct {
 	CPU                bool              `yaml:"cpu"`
 	Temperature        bool              `yaml:"temperature"`
 	GatewayMonitors    map[string]string `yaml:"gateway_monitors"`
+	ISPNames           map[string]string `yaml:"isp_names"`
+	ISPLookup          bool              `yaml:"isp_lookup"`
 	Neighbors          bool              `yaml:"neighbors"`
 	DHCPBackends       []string          `yaml:"dhcp_backends"`
 	VLANs              bool              `yaml:"vlans"`
@@ -93,6 +95,7 @@ type Controller struct {
 	URL          string         `yaml:"url"`
 	CAFile       string         `yaml:"ca_file"`
 	Interval     time.Duration  `yaml:"interval"`
+	MinInterval  time.Duration  `yaml:"min_interval"`
 	Timeout      time.Duration  `yaml:"timeout"`
 }
 
@@ -105,6 +108,7 @@ type ControllerAPI struct {
 	SyncWANs      bool   `yaml:"sync_wans"`
 	SyncVLANs     bool   `yaml:"sync_vlans"`
 	DisabledPorts []int  `yaml:"disabled_ports"`
+	NativeVLAN    int    `yaml:"native_vlan"`
 }
 
 // RoutePolicy restricts review plans and defines capture-derived field mappings.
@@ -245,6 +249,9 @@ func (c Config) Validate() error {
 		if g.Source.Timeout <= 0 || g.Source.Timeout > time.Minute || g.Controller.Timeout <= 0 || g.Controller.Timeout > time.Minute || g.Controller.Interval < 5*time.Second || g.Controller.Interval > time.Minute {
 			return fmt.Errorf("gateway %q has invalid timeout or interval", id.ID)
 		}
+		if m := g.Controller.MinInterval; m != 0 && (m < time.Second || m > time.Minute || m%time.Second != 0) {
+			return fmt.Errorf("gateway %q min_interval must be whole seconds from 1s to 1m", id.ID)
+		}
 		if g.Controller.Provisioning != "review" && g.Controller.Provisioning != "monitor" {
 			return fmt.Errorf("gateway %q provisioning must be review or monitor", id.ID)
 		}
@@ -257,6 +264,9 @@ func (c Config) Validate() error {
 			}
 			if a.SyncVLANs && !g.Source.VLANs {
 				return fmt.Errorf("gateway %q requires source.vlans for controller VLAN sync", id.ID)
+			}
+			if a.NativeVLAN != 0 && (!a.SyncVLANs || a.NativeVLAN < 1 || a.NativeVLAN > 4094) {
+				return fmt.Errorf("gateway %q native_vlan requires sync_vlans and a tag from 1 to 4094", id.ID)
 			}
 			if a.Site != "" && !safeID.MatchString(a.Site) {
 				return fmt.Errorf("gateway %q has invalid controller site", id.ID)
@@ -299,6 +309,11 @@ func (c Config) Validate() error {
 		for role, name := range g.Source.GatewayMonitors {
 			if (role != "wan" && role != "wan2") || name == "" || !roles[role] {
 				return fmt.Errorf("gateway %q has invalid WAN monitor mapping", id.ID)
+			}
+		}
+		for role, name := range g.Source.ISPNames {
+			if (role != "wan" && role != "wan2") || strings.TrimSpace(name) == "" || !roles[role] {
+				return fmt.Errorf("gateway %q has invalid WAN ISP name", id.ID)
 			}
 		}
 		if g.ClientTTL < time.Second || g.ClientTTL > 24*time.Hour {

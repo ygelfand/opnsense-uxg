@@ -31,6 +31,9 @@ type Source struct {
 	DHCPBackends    []string
 	VLANs           bool
 	Accounting      AccountingOptions
+	FullInterval    time.Duration
+	full            domain.Snapshot
+	fullAt          time.Time
 	accountingMu    sync.Mutex
 	accountingTo    time.Time
 	accountingData  []domain.ClientTraffic
@@ -53,6 +56,17 @@ func (s *Source) Collect(ctx context.Context) (domain.Snapshot, error) {
 		ctx, cancel = context.WithTimeout(ctx, s.Timeout)
 		defer cancel()
 	}
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	if s.Statistics && s.FullInterval > 0 && !s.fullAt.IsZero() && now().Sub(s.fullAt) < s.FullInterval {
+		snap, err := s.collectCounters(ctx, now)
+		if err != nil {
+			s.fullAt = time.Time{}
+		}
+		return snap, err
+	}
 	var raw map[string]diagnostics.Interface
 	if err := s.Client.request(ctx, httpGET, "/diagnostics/interface/getInterfaceConfig", nil, &raw); err != nil {
 		return domain.Snapshot{}, err
@@ -62,21 +76,9 @@ func (s *Source) Collect(ctx context.Context) (domain.Snapshot, error) {
 	}
 	stats := map[string]domain.Counters{}
 	if s.Statistics {
-		var response struct {
-			Statistics map[string]statRow `json:"statistics"`
-		}
-		if err := s.Client.request(ctx, httpGET, "/diagnostics/interface/getInterfaceStatistics", nil, &response); err != nil {
+		var err error
+		if stats, err = s.counters(ctx); err != nil {
 			return domain.Snapshot{}, err
-		}
-		if response.Statistics == nil {
-			return domain.Snapshot{}, fmt.Errorf("interface statistics response omitted its table")
-		}
-		for _, row := range response.Statistics {
-			if row.Name == "" {
-				return domain.Snapshot{}, fmt.Errorf("interface statistics row omitted its name")
-			}
-			old := stats[row.Name]
-			stats[row.Name] = domain.Counters{RXBytes: counterMax(old.RXBytes, row.RXBytes), TXBytes: counterMax(old.TXBytes, row.TXBytes), RXPackets: counterMax(old.RXPackets, row.RXPackets), TXPackets: counterMax(old.TXPackets, row.TXPackets)}
 		}
 	}
 	snap := domain.Snapshot{SourceID: s.ID, Interfaces: make([]domain.Interface, 0, len(raw))}
@@ -115,13 +117,55 @@ func (s *Source) Collect(ctx context.Context) (domain.Snapshot, error) {
 		s.collectInterfaceAssignments(ctx, &snap)
 	}
 	s.collectTelemetry(ctx, &snap)
-	now := time.Now
-	if s.Now != nil {
-		now = s.Now
-	}
 	snap.ObservedAt = now()
 	s.collectInventory(ctx, &snap)
+	s.full, s.fullAt = snap, snap.ObservedAt
+	s.full.Interfaces, s.full.Warnings = append([]domain.Interface{}, snap.Interfaces...), nil
 	return snap, nil
+}
+
+func (s *Source) collectCounters(ctx context.Context, now func() time.Time) (domain.Snapshot, error) {
+	stats, err := s.counters(ctx)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	snap := s.full
+	snap.Interfaces = append([]domain.Interface{}, s.full.Interfaces...)
+	for i := range snap.Interfaces {
+		snap.Interfaces[i].Counters = stats[snap.Interfaces[i].Name]
+	}
+	snap.Warnings, snap.Gateways = nil, nil
+	if len(s.GatewayMonitors) > 0 {
+		gateways, err := s.gatewayStatus(ctx)
+		if err != nil {
+			snap.Warnings = append(snap.Warnings, "gateway_status_unavailable")
+		} else {
+			snap.Gateways = gateways
+		}
+	}
+	snap.ObservedAt = now()
+	return snap, nil
+}
+
+func (s *Source) counters(ctx context.Context) (map[string]domain.Counters, error) {
+	var response struct {
+		Statistics map[string]statRow `json:"statistics"`
+	}
+	if err := s.Client.request(ctx, httpGET, "/diagnostics/interface/getInterfaceStatistics", nil, &response); err != nil {
+		return nil, err
+	}
+	if response.Statistics == nil {
+		return nil, fmt.Errorf("interface statistics response omitted its table")
+	}
+	stats := map[string]domain.Counters{}
+	for _, row := range response.Statistics {
+		if row.Name == "" {
+			return nil, fmt.Errorf("interface statistics row omitted its name")
+		}
+		old := stats[row.Name]
+		stats[row.Name] = domain.Counters{RXBytes: counterMax(old.RXBytes, row.RXBytes), TXBytes: counterMax(old.TXBytes, row.TXBytes), RXPackets: counterMax(old.RXPackets, row.RXPackets), TXPackets: counterMax(old.TXPackets, row.TXPackets)}
+	}
+	return stats, nil
 }
 
 // counterMax coalesces netstat rows for multiple addresses of the same interface.

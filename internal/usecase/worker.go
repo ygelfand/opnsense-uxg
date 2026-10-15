@@ -20,6 +20,7 @@ type Worker struct {
 	Publisher          domain.Publisher
 	Store              domain.StateStore
 	Interval           time.Duration
+	MinInterval        time.Duration
 	Timeout            time.Duration
 	Plan               func(context.Context, []byte, string) error
 	OnReset            func() error
@@ -29,6 +30,7 @@ type Worker struct {
 	SyncInventory      func(context.Context, domain.Snapshot) (domain.InventorySync, error)
 	Clients            ClientTracker
 	WAN                WANTracker
+	Providers          ProviderTracker
 	SaveHistory        func([]domain.Client, []domain.WANHistory) error
 	Discover           func(context.Context, domain.Snapshot) error
 	interval           time.Duration
@@ -88,6 +90,7 @@ func (w *Worker) Cycle(ctx context.Context) (CycleResult, error) {
 	}
 	w.WAN.MaxGap = 2 * interval
 	snap = w.WAN.Apply(snap)
+	snap = w.Providers.Apply(ctx, snap, w.Bindings)
 	w.lastCollection = snap.ObservedAt
 	r.ObservedAt, r.LastCollectionAt, r.InterfaceCount = snap.ObservedAt, snap.ObservedAt, len(snap.Interfaces)
 	r.System, r.Gateways, r.Warnings = snap.System, snap.Gateways, snap.Warnings
@@ -126,7 +129,11 @@ func (w *Worker) Cycle(ctx context.Context) (CycleResult, error) {
 	w.lastInform = now()
 	r.LastInformAt = w.lastInform
 	if ex.Interval > 0 {
-		w.interval = max(5*time.Second, min(time.Minute, ex.Interval))
+		floor := 5 * time.Second
+		if w.MinInterval > 0 {
+			floor = w.MinInterval
+		}
+		w.interval = max(floor, min(time.Minute, ex.Interval))
 	}
 	r.Adopted, r.IgnoredCommand = ex.Adoption.AuthKey != "", ex.IgnoredCommand
 	if r.Adopted && !ex.ResetRequested && w.SyncInventory != nil {

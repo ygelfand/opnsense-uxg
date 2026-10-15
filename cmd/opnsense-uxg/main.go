@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ygelfand/opnsense-uxg/internal/adapters/cymru"
 	"github.com/ygelfand/opnsense-uxg/internal/adapters/filestate"
 	"github.com/ygelfand/opnsense-uxg/internal/adapters/opnsense"
 	"github.com/ygelfand/opnsense-uxg/internal/adapters/unifi"
@@ -105,8 +106,8 @@ func run() error {
 		if _, err := store.Load(); err != nil {
 			return fmt.Errorf("gateway %q: %w", g.Identity.ID, err)
 		}
-		publisher := &unifi.Publisher{Identity: g.Identity, Bindings: g.Bindings, UplinkInterface: g.UplinkInterface, URL: g.Controller.URL, Client: httpClient, StartedAt: time.Now()}
-		worker := &usecase.Worker{ID: g.Identity.ID, Source: source, Publisher: publisher, Store: store, Interval: g.Controller.Interval, Timeout: g.Source.Timeout + g.Controller.Timeout}
+		publisher := &unifi.Publisher{Identity: g.Identity, Bindings: g.Bindings, UplinkInterface: g.UplinkInterface, MinInterval: g.Controller.MinInterval, URL: g.Controller.URL, Client: httpClient, StartedAt: time.Now()}
+		worker := &usecase.Worker{ID: g.Identity.ID, Source: source, Publisher: publisher, Store: store, Interval: g.Controller.Interval, MinInterval: g.Controller.MinInterval, Timeout: g.Source.Timeout + g.Controller.Timeout}
 		worker.Bindings = g.Bindings
 		if g.HA != nil {
 			worker.HA = usecase.HATracker{Role: g.HA.Role, Peer: g.HA.Peer}
@@ -130,7 +131,7 @@ func run() error {
 					}
 				}
 			}
-			inventory := &unifiapi.Client{URL: strings.TrimRight(base, "/"), Key: key, Site: a.Site, Prefix: prefix, HTTP: apiHTTP, Identity: g.Identity, Bindings: bindings, DisabledPorts: a.DisabledPorts, SyncWANs: a.SyncWANs, SyncVLANs: a.SyncVLANs}
+			inventory := &unifiapi.Client{URL: strings.TrimRight(base, "/"), Key: key, Site: a.Site, Prefix: prefix, HTTP: apiHTTP, Identity: g.Identity, Bindings: bindings, DisabledPorts: a.DisabledPorts, SyncWANs: a.SyncWANs, SyncVLANs: a.SyncVLANs, NativeVLAN: a.NativeVLAN}
 			if g.HA != nil {
 				for _, peer := range cfg.Gateways {
 					if peer.Identity.ID == g.HA.Peer {
@@ -165,6 +166,10 @@ func run() error {
 		}
 		worker.Clients.Entries, worker.WAN.Entries = history.Clients, history.WAN
 		worker.WAN.MaxGap = 2 * g.Controller.Interval
+		worker.Providers.Names = g.Source.ISPNames
+		if g.Source.ISPLookup {
+			worker.Providers.Lookup = cymru.Resolver{}.Lookup
+		}
 		worker.SaveHistory = func(clients []domain.Client, wan []domain.WANHistory) error {
 			history.Clients, history.WAN = clients, wan
 			return filestate.WriteJSON(historyPath, history)
@@ -281,7 +286,7 @@ func openSource(g config.Gateway) (*opnsense.Client, *opnsense.Source, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return client, &opnsense.Source{Client: client, Assignments: g.Controller.API != nil && g.Controller.API.SyncWANs, ID: g.Identity.ID, Statistics: g.Source.Statistics, System: g.Source.System, CPU: g.Source.CPU, Temperature: g.Source.Temperature, GatewayMonitors: g.Source.GatewayMonitors, Timeout: g.Source.Timeout, Neighbors: g.Source.Neighbors, DHCPBackends: g.Source.DHCPBackends, VLANs: g.Source.VLANs, Accounting: opnsense.AccountingOptions{Enabled: g.Source.Accounting.Enabled, Interfaces: g.Source.Accounting.Interfaces, Window: g.Source.Accounting.Window, MaxRows: g.Source.Accounting.MaxRows}}, nil
+	return client, &opnsense.Source{Client: client, Assignments: g.Controller.API != nil && g.Controller.API.SyncWANs, ID: g.Identity.ID, Statistics: g.Source.Statistics, System: g.Source.System, CPU: g.Source.CPU, Temperature: g.Source.Temperature, GatewayMonitors: g.Source.GatewayMonitors, Timeout: g.Source.Timeout, Neighbors: g.Source.Neighbors, DHCPBackends: g.Source.DHCPBackends, VLANs: g.Source.VLANs, FullInterval: time.Minute, Accounting: opnsense.AccountingOptions{Enabled: g.Source.Accounting.Enabled, Interfaces: g.Source.Accounting.Interfaces, Window: g.Source.Accounting.Window, MaxRows: g.Source.Accounting.MaxRows}}, nil
 }
 
 func printStatus(cfg config.Config) error {
@@ -322,7 +327,7 @@ func collectOne(ctx context.Context, g config.Gateway, source domain.Source, dry
 	if err != nil {
 		return err
 	}
-	b, err := unifi.Render(g.Identity, g.Bindings, g.UplinkInterface, snap, state, reportedURL, time.Second)
+	b, err := unifi.Render(g.Identity, g.Bindings, g.UplinkInterface, snap, state, reportedURL, time.Second, g.Controller.MinInterval)
 	if err != nil {
 		return err
 	}

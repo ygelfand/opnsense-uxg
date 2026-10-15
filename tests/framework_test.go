@@ -69,7 +69,7 @@ func TestObservedStateAndUnknownMeasurements(t *testing.T) {
 	if len(snap.Interfaces) != 2 || snap.Interfaces[0].Counters.RXBytes == nil || *snap.Interfaces[0].Counters.RXBytes != 0 {
 		t.Fatalf("measured zero counter lost: %+v", snap)
 	}
-	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{MAC: identity().MAC}, "http://192.0.2.100:8080/inform", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{MAC: identity().MAC}, "http://192.0.2.100:8080/inform", time.Minute, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestObservedStateAndUnknownMeasurements(t *testing.T) {
 	if err := json.Unmarshal(b, &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"system-stats", "gw_caps", "internet_health"} {
+	for _, field := range []string{"system-stats", "internet_health"} {
 		if _, ok := payload[field]; ok {
 			t.Errorf("unexpected invented telemetry field %q", field)
 		}
@@ -105,7 +105,7 @@ func TestObservedStateAndUnknownMeasurements(t *testing.T) {
 	if _, ok := ports[0]["rx_bytes"]; ok {
 		t.Fatal("unknown port counter became a measurement")
 	}
-	if _, err := unifi.Render(identity(), []domain.Binding{{Port: 1, Interface: "missing", Role: "lan"}}, "", snap, domain.Adoption{}, "", time.Minute); err == nil {
+	if _, err := unifi.Render(identity(), []domain.Binding{{Port: 1, Interface: "missing", Role: "lan"}}, "", snap, domain.Adoption{}, "", time.Minute, 0); err == nil {
 		t.Error("missing mapped interface accepted")
 	}
 }
@@ -436,5 +436,57 @@ func TestAPIRejectsErrorsAndIncompleteInventory(t *testing.T) {
 	}
 	if _, err := unifi.ParseResponse([]byte(fmt.Sprintf(`{"_type":"setparam","mgmt_cfg":"authkey=%s"}`, "bad")), domain.Exchange{}); err == nil {
 		t.Error("malformed adoption key accepted")
+	}
+}
+
+// Controller replies are synthetic; live_update matches a 10.6.106 reply observed from UniFi OS Server.
+func TestLiveUpdateRepliesUseMinimumInterval(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		min      time.Duration
+		reply    string
+		want     time.Duration
+		liveCaps bool
+	}{
+		{2 * time.Second, `{"_type":"noop","interval":71,"live_update":true,"include_blocks":["gw_caps"]}`, 2 * time.Second, true},
+		{2 * time.Second, `{"_type":"noop","interval":75,"live_update":false}`, time.Minute, true},
+		{0, `{"_type":"noop","interval":75,"live_update":true}`, time.Minute, false},
+	} {
+		var caps float64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			packet, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			plain, err := unifi.DecodePacket(packet, "")
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			var inform struct {
+				Caps float64 `json:"usg2_caps"`
+			}
+			if err := json.Unmarshal(plain, &inform); err != nil {
+				t.Error(err)
+			}
+			caps = inform.Caps
+			body, err := unifi.EncodePacket(identity().MAC, "", false, []byte(tc.reply))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_, _ = w.Write(body)
+		}))
+		pub := &unifi.Publisher{Identity: identity(), Bindings: bindings(), URL: srv.URL, Client: srv.Client(), StartedAt: time.Now(), MinInterval: tc.min}
+		snap, _ := healthySource{}.Collect(t.Context())
+		ex, err := pub.Publish(t.Context(), snap, domain.Adoption{MAC: identity().MAC})
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ex.Interval != tc.want || (int(caps)&16 != 0) != tc.liveCaps {
+			t.Fatalf("min %v reply %s: interval %v caps %v", tc.min, tc.reply, ex.Interval, caps)
+		}
 	}
 }

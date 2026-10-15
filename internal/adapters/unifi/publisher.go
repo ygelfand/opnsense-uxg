@@ -21,6 +21,7 @@ type Publisher struct {
 	Bindings []domain.Binding
 	// UplinkInterface is the configured source interface reported to UniFi.
 	UplinkInterface string
+	MinInterval     time.Duration
 	URL             string
 	Client          *http.Client
 	StartedAt       time.Time
@@ -49,7 +50,7 @@ func (p *Publisher) Publish(ctx context.Context, snap domain.Snapshot, state dom
 		}
 		p.reportedURL = resolved
 	}
-	payload, err := Render(p.Identity, p.Bindings, p.UplinkInterface, snap, state, p.reportedURL, now().Sub(p.StartedAt))
+	payload, err := Render(p.Identity, p.Bindings, p.UplinkInterface, snap, state, p.reportedURL, now().Sub(p.StartedAt), p.MinInterval)
 	if err != nil {
 		return domain.Exchange{}, err
 	}
@@ -124,6 +125,14 @@ func (p *Publisher) exchange(ctx context.Context, payload []byte, state domain.A
 		return ex, &packetDecodeError{err: err}
 	}
 	ex, err = ParseResponse(plain, ex)
+	if err == nil && p.MinInterval > 0 && ex.ResponseType == "noop" {
+		var live struct {
+			LiveUpdate json.RawMessage `json:"live_update"`
+		}
+		if json.Unmarshal(plain, &live) == nil && (string(live.LiveUpdate) == "true" || string(live.LiveUpdate) == "1") {
+			ex.Interval = p.MinInterval
+		}
+	}
 	if err == nil && gcm && !ex.ResetRequested {
 		ex.Adoption.UseGCM = true
 	}

@@ -36,27 +36,30 @@ type interfaceRow struct {
 }
 
 type networkRow struct {
-	Name         string        `json:"name"`
-	IfName       string        `json:"ifname,omitempty"`
-	NetworkGroup string        `json:"networkgroup,omitempty"`
-	PortIdx      int           `json:"port_idx,omitempty"`
-	Stats        *networkStats `json:"stats,omitempty"`
-	Address      string        `json:"address,omitempty"`
-	Addresses    []string      `json:"addresses"`
-	MAC          string        `json:"mac,omitempty"`
-	Up           *bool         `json:"up,omitempty"`
-	Speed        string        `json:"speed,omitempty"`
-	Duplex       string        `json:"duplex,omitempty"`
-	WANConnected *bool         `json:"isWanConnected,omitempty"`
-	WANUp        *bool         `json:"isWanUp,omitempty"`
-	Latency      *int          `json:"latency,omitempty"`
-	HostTable    []hostRow     `json:"host_table,omitempty"`
+	Name             string        `json:"name"`
+	IfName           string        `json:"ifname,omitempty"`
+	NetworkGroup     string        `json:"networkgroup,omitempty"`
+	PortIdx          int           `json:"port_idx,omitempty"`
+	Stats            *networkStats `json:"stats,omitempty"`
+	Address          string        `json:"address,omitempty"`
+	Addresses        []string      `json:"addresses"`
+	MAC              string        `json:"mac,omitempty"`
+	Up               *bool         `json:"up,omitempty"`
+	Speed            string        `json:"speed,omitempty"`
+	Duplex           string        `json:"duplex,omitempty"`
+	WANConnected     *bool         `json:"isWanConnected,omitempty"`
+	WANUp            *bool         `json:"isWanUp,omitempty"`
+	Latency          *int          `json:"latency,omitempty"`
+	HostTable        []hostRow     `json:"host_table,omitempty"`
+	ActiveDHCPLeases *int          `json:"active_dhcp_lease_count,omitempty"`
 }
 
 type networkStats struct {
 	domain.Counters
-	RXRate *int64 `json:"rx_bytes-r,omitempty"`
-	TXRate *int64 `json:"tx_bytes-r,omitempty"`
+	RXRate    *int64 `json:"rx_bytes-r,omitempty"`
+	TXRate    *int64 `json:"tx_bytes-r,omitempty"`
+	RXBitRate *int64 `json:"rx_rate,omitempty"`
+	TXBitRate *int64 `json:"tx_rate,omitempty"`
 }
 
 type hostRow struct {
@@ -72,7 +75,7 @@ type hostRow struct {
 
 // Render projects mapped observed interfaces into the captured UXG table shapes.
 // Missing mapped interfaces fail the cycle so a disappearing NIC stays visible.
-func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface string, snap domain.Snapshot, adoption domain.Adoption, informURL string, uptime time.Duration) ([]byte, error) {
+func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface string, snap domain.Snapshot, adoption domain.Adoption, informURL string, uptime, minInterval time.Duration) ([]byte, error) {
 	if snap.SourceID != id.ID {
 		return nil, fmt.Errorf("snapshot belongs to another source")
 	}
@@ -99,7 +102,7 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 		name := "eth" + strconv.Itoa(binding.Port-1)
 		row := interfaceRow{Name: name, Comment: strings.ToUpper(binding.Role), MAC: observed.MAC, NumPort: 1, PhysicalPorts: []int{binding.Port}, Up: observed.Up, Speed: observed.SpeedMbps, Counters: observed.Counters}
 		row.RXRate, row.TXRate = wireRate(observed.Rates.RXBytesPerSecond), wireRate(observed.Rates.TXBytesPerSecond)
-		network := networkRow{Name: name, IfName: name, NetworkGroup: strings.ToUpper(binding.Role), PortIdx: binding.Port, Addresses: append([]string{}, observed.Addresses...), MAC: observed.MAC, Up: observed.Up, Duplex: observed.Duplex}
+		network := networkRow{Name: name, IfName: name, NetworkGroup: strings.ToUpper(binding.Role), PortIdx: binding.Port, Addresses: gatewayAddressesFirst(binding.Interface, observed.Addresses, snap.CARP), MAC: observed.MAC, Up: observed.Up, Duplex: observed.Duplex}
 		network.Stats = measuredNetworkStats(observed)
 		if monitor, ok := monitors[binding.Role]; ok {
 			row.WANUp, row.WANConnected = observed.Up, monitor.Connected
@@ -127,11 +130,19 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 			if p.Addr().Is4() && row.IP == "" {
 				row.IP = p.Addr().String()
 				row.Netmask = net.IP(net.CIDRMask(p.Bits(), 32)).String()
+			}
+		}
+		for _, addr := range network.Addresses {
+			if p, err := netip.ParsePrefix(addr); err == nil && p.Addr().Is4() {
 				network.Address = addr
+				break
 			}
 		}
 		ifs, nets = append(ifs, row), append(nets, network)
 		port := map[string]any{"port_idx": binding.Port, "name": name, "ifname": name, "networkgroup": strings.ToUpper(binding.Role), "network_name": strings.ToUpper(binding.Role), "type": "wire"}
+		if media := portMedia(id.Model, binding.Port); media != "" {
+			port["media"] = media
+		}
 		if observed.MAC != "" {
 			port["mac"] = observed.MAC
 		}
@@ -162,6 +173,12 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 		if row.TXRate != nil {
 			port["tx_bytes-r"] = *row.TXRate
 		}
+		if rate := bitRate(observed.Rates.RXBytesPerSecond); rate != nil {
+			port["rx_rate"] = *rate
+		}
+		if rate := bitRate(observed.Rates.TXBytesPerSecond); rate != nil {
+			port["tx_rate"] = *rate
+		}
 		ports = append(ports, port)
 		assignment := map[string]any{"ifname": name, "port_idx": binding.Port, "networkgroup": strings.ToUpper(binding.Role), "role": binding.Role}
 		if observed.AdminEnabled != nil {
@@ -171,6 +188,37 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 		assignments = append(assignments, assignment)
 	}
 	nets = clientNetworks(nets, snap, ordered)
+	leases, leaseIPs := []map[string]any{}, []netip.Addr{}
+	for _, client := range snap.Clients {
+		if client.MAC == "" {
+			continue
+		}
+		for _, lease := range client.Leases {
+			ip, err := netip.ParseAddr(lease.IP)
+			if err != nil || !ip.Is4() {
+				continue
+			}
+			row := map[string]any{"mac": client.MAC, "ip": ip.String(), "hostname": lease.Hostname, "static": lease.Reserved}
+			if lease.ExpiresAt != nil {
+				row["leaseExpiry"] = lease.ExpiresAt.Unix()
+			}
+			leases, leaseIPs = append(leases, row), append(leaseIPs, ip)
+		}
+	}
+	if snap.LeasesComplete {
+		for i := range nets {
+			count := 0
+			for _, ip := range leaseIPs {
+				for _, address := range nets[i].Addresses {
+					if prefix, err := netip.ParsePrefix(address); err == nil && prefix.Masked().Contains(ip) {
+						count++
+						break
+					}
+				}
+			}
+			nets[i].ActiveDHCPLeases = &count
+		}
+	}
 	adopted := adoption.AuthKey != ""
 	state := 1
 	if adopted {
@@ -207,6 +255,7 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 		"ethernet_overrides": assignments, "config_port_table": assignments,
 		"udapi_version": map[string]any{"version": 48},
 		"udapi_caps":    0,
+		"gw_caps":       map[string]any{},
 	}
 	if uplinkInterface != "" {
 		uplink, role := logicalInterfaceRole(uplinkInterface, bindings, snap.VLANs)
@@ -218,39 +267,30 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 	if snap.System.UptimeSeconds != nil {
 		root["uptime"] = *snap.System.UptimeSeconds
 	}
+	if minInterval > 0 {
+		root["inform_min_interval"] = int(minInterval / time.Second)
+	}
 	if id.Model == "UXGENT" {
 		root["udapi_version"] = map[string]any{"version": "2.0.0"}
 	}
+	caps := 0
+	if minInterval > 0 {
+		caps |= 16
+	}
 	if id.Model == "UXGENT" && snap.HA != nil {
-		root["usg2_caps"] = 1073741824
+		caps |= 1073741824
 		vrrp := map[string]any{"state": snap.HA.CARPState}
 		if snap.HA.ObservedTransitionAt != nil {
 			vrrp["lastTransition"] = snap.HA.ObservedTransitionAt.UnixMilli()
 		}
 		root["vrrp"] = vrrp
 	}
+	if caps != 0 {
+		root["usg2_caps"] = caps
+	}
 	addSystemStats(root, snap.System)
-	if snap.LeasesComplete {
-		leases := []map[string]any{}
-		for _, client := range snap.Clients {
-			if client.MAC == "" {
-				continue
-			}
-			for _, lease := range client.Leases {
-				ip, err := netip.ParseAddr(lease.IP)
-				if err != nil || !ip.Is4() {
-					continue
-				}
-				row := map[string]any{"mac": client.MAC, "ip": ip.String(), "hostname": lease.Hostname, "static": lease.Reserved}
-				if lease.ExpiresAt != nil {
-					row["expires"] = lease.ExpiresAt.Unix()
-				}
-				leases = append(leases, row)
-			}
-		}
-		if len(snap.Leases) > 0 {
-			root["ipv4_active_leases"] = leases
-		}
+	if snap.LeasesComplete && len(snap.Leases) > 0 {
+		root["ipv4_active_leases"] = leases
 	}
 	if len(wanStatus) > 0 {
 		root["last_wan_status"] = wanStatus
@@ -260,7 +300,7 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 }
 
 func measuredNetworkStats(observed domain.Interface) *networkStats {
-	stats := networkStats{Counters: observed.Counters, RXRate: wireRate(observed.Rates.RXBytesPerSecond), TXRate: wireRate(observed.Rates.TXBytesPerSecond)}
+	stats := networkStats{Counters: observed.Counters, RXRate: wireRate(observed.Rates.RXBytesPerSecond), TXRate: wireRate(observed.Rates.TXBytesPerSecond), RXBitRate: bitRate(observed.Rates.RXBytesPerSecond), TXBitRate: bitRate(observed.Rates.TXBytesPerSecond)}
 	if stats.RXBytes == nil && stats.TXBytes == nil && stats.RXPackets == nil && stats.TXPackets == nil && stats.RXRate == nil && stats.TXRate == nil {
 		return nil
 	}
@@ -283,10 +323,10 @@ func clientNetworks(rows []networkRow, snap domain.Snapshot, bindings []domain.B
 		row := networkRow{Name: name, Addresses: []string{}}
 		for _, iface := range snap.Interfaces {
 			if iface.Name == vlan.Interface {
-				row.Addresses = append([]string{}, iface.Addresses...)
+				row.Addresses = gatewayAddressesFirst(iface.Name, iface.Addresses, snap.CARP)
 				row.MAC, row.Up, row.Duplex = iface.MAC, iface.Up, iface.Duplex
-				if len(iface.Addresses) > 0 {
-					row.Address = iface.Addresses[0]
+				if len(row.Addresses) > 0 {
+					row.Address = row.Addresses[0]
 				}
 			}
 		}
@@ -311,10 +351,10 @@ func clientNetworks(rows []networkRow, snap domain.Snapshot, bindings []domain.B
 				row := networkRow{Name: name, Addresses: []string{}}
 				for _, iface := range snap.Interfaces {
 					if iface.Name == address.Interface {
-						row.Addresses = append([]string{}, iface.Addresses...)
+						row.Addresses = gatewayAddressesFirst(iface.Name, iface.Addresses, snap.CARP)
 						row.MAC, row.Up = iface.MAC, iface.Up
-						if len(iface.Addresses) > 0 {
-							row.Address = iface.Addresses[0]
+						if len(row.Addresses) > 0 {
+							row.Address = row.Addresses[0]
 						}
 					}
 				}
@@ -417,6 +457,43 @@ func wireRate(value *float64) *int64 {
 	}
 	v := int64(*value)
 	return &v
+}
+
+func gatewayAddressesFirst(iface string, addresses []string, carp []domain.CARPObservation) []string {
+	out := append([]string{}, addresses...)
+	vips := map[netip.Addr]bool{}
+	for _, observation := range carp {
+		if addr, err := netip.ParseAddr(observation.Address); err == nil && observation.Interface == iface {
+			vips[addr] = true
+		}
+	}
+	isVIP := func(address string) bool {
+		prefix, err := netip.ParsePrefix(address)
+		return err == nil && vips[prefix.Addr()]
+	}
+	sort.SliceStable(out, func(i, j int) bool { return isVIP(out[i]) && !isVIP(out[j]) })
+	return out
+}
+
+// portMedia follows the 10.6.106 uidb link speeds for each model's physical ports.
+func portMedia(model string, port int) string {
+	media := map[string][]string{
+		"UXG":    {"GE", "GE"},
+		"UXGPRO": {"GE", "GE", "SFP+", "SFP+"},
+		"UXGENT": {"2P5GE", "2P5GE", "SFP+", "SFP+", "SFP28", "SFP28"},
+	}[model]
+	if port < 1 || port > len(media) {
+		return ""
+	}
+	return media[port-1]
+}
+
+func bitRate(bytesPerSecond *float64) *int64 {
+	if bytesPerSecond == nil {
+		return nil
+	}
+	bits := *bytesPerSecond * 8
+	return wireRate(&bits)
 }
 
 func addSystemStats(root map[string]any, system domain.System) {

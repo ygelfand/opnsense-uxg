@@ -3,11 +3,13 @@ package framework_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,7 +75,7 @@ func TestApplianceTelemetryAndWANProjection(t *testing.T) {
 	if len(snap.CARP) != 2 || snap.CARP[0].State != "MASTER" || snap.CARP[1].State != "BACKUP" || snap.CARP[1].Address != "2001:db8::ff" || snap.CARP[0].VHID == nil || *snap.CARP[0].VHID != 10 {
 		t.Fatal("per-VIP CARP observations were lost or collapsed into a global role")
 	}
-	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +130,7 @@ func TestOptionalTelemetryFailureClearsMeasurements(t *testing.T) {
 	if snap.System.CPUPercent != nil || snap.System.UptimeSeconds != nil || len(snap.Gateways) > 0 {
 		t.Error("failed endpoints produced measurements")
 	}
-	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,5 +255,98 @@ func TestStatusFreshnessAndSecretFreeOutput(t *testing.T) {
 	result, err := worker.Cycle(t.Context())
 	if err == nil || !result.Adopted || !result.LastInformAt.Equal(cycle.LastInformAt) || !result.LastCollectionAt.Equal(cycle.LastCollectionAt) || pub.calls != 0 {
 		t.Errorf("restart/failure lost lifecycle history: %+v, %v", result, err)
+	}
+}
+
+// API responses are synthetic and follow the documented endpoint shapes.
+func TestCountersRefreshBetweenFullCollections(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	hits := map[string]int{}
+	failStats := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		hits[r.URL.Path]++
+		switch r.URL.Path {
+		case "/api/diagnostics/interface/getInterfaceConfig":
+			_, _ = io.WriteString(w, interfaceJSON)
+		case "/api/diagnostics/interface/getInterfaceStatistics":
+			if failStats {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"statistics":{"[igc0]":{"name":"igc0","received-bytes":%d,"sent-bytes":%d}}}`, 1000*hits[r.URL.Path], 10*hits[r.URL.Path])
+		case "/api/interfaces/overview/interfaces_info":
+			_, _ = io.WriteString(w, `{"rows":[{"description":"Internet","config":{"if":"igc0","enable":"1","ipaddr":"dhcp"}}]}`)
+		case "/api/routes/gateway/status":
+			_, _ = io.WriteString(w, `{"status":"ok","items":[{"name":"WAN_GW","status":"none","delay":"7.4 ms","loss":"0.0 %"}]}`)
+		default:
+			t.Errorf("unexpected endpoint %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client, err := opnsense.NewClient(srv.URL, "test-key", "test-secret", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	source := &opnsense.Source{Client: client, ID: "edge", Statistics: true, GatewayMonitors: map[string]string{"wan": "WAN_GW"}, FullInterval: time.Minute, Now: func() time.Time { return now }}
+	collect := func(at time.Duration) domain.Snapshot {
+		t.Helper()
+		now = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(at)
+		snap, err := source.Collect(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap
+	}
+	count := func(path string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return hits["/api/"+path]
+	}
+	collect(0)
+	fast := collect(10 * time.Second)
+	if count("diagnostics/interface/getInterfaceConfig") != 1 || count("interfaces/overview/interfaces_info") != 1 || count("diagnostics/interface/getInterfaceStatistics") != 2 || count("routes/gateway/status") != 2 {
+		t.Fatalf("fast cycle requests = %v", hits)
+	}
+	if fast.ObservedAt != now || *fast.Interfaces[0].Counters.RXBytes != 2000 || fast.Interfaces[0].IPv4Mode != "dhcp" || len(fast.Gateways) != 1 {
+		t.Fatalf("fast snapshot = %+v", fast)
+	}
+	collect(61 * time.Second)
+	if count("diagnostics/interface/getInterfaceConfig") != 2 {
+		t.Fatal("full collection did not resume after its interval")
+	}
+	mu.Lock()
+	failStats = true
+	mu.Unlock()
+	if _, err := source.Collect(t.Context()); err == nil {
+		t.Fatal("failed counter refresh was reported as success")
+	}
+	mu.Lock()
+	failStats = false
+	mu.Unlock()
+	collect(65 * time.Second)
+	if count("diagnostics/interface/getInterfaceConfig") != 3 {
+		t.Fatal("failed counter refresh did not force a full collection")
+	}
+}
+
+func TestMinimumInformIntervalIsAdvertised(t *testing.T) {
+	t.Parallel()
+	id := identity()
+	snap := domain.Snapshot{SourceID: id.ID, ObservedAt: time.Now(), Interfaces: []domain.Interface{{Name: "uplink"}}}
+	b, err := unifi.Render(id, []domain.Binding{{Port: 1, Interface: "uplink", Role: "lan"}}, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(b, &root); err != nil {
+		t.Fatal(err)
+	}
+	if root["inform_min_interval"] != float64(2) {
+		t.Fatalf("inform_min_interval = %v", root["inform_min_interval"])
 	}
 }

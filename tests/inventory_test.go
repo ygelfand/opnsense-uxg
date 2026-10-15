@@ -91,14 +91,15 @@ func TestInventoryClientAssociationAndFlowProjection(t *testing.T) {
 	if len(observed.Traffic) != 1 || observed.Traffic[0].RXBytes == nil || *observed.Traffic[0].RXBytes != 3001 || *observed.Traffic[0].TXBytes != 1500 || observed.Traffic[0].To.Sub(observed.Traffic[0].From) != 5*time.Minute {
 		t.Fatalf("client window totals = %+v", observed.Traffic)
 	}
-	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(identity(), bindings(), "", snap, domain.Adoption{}, "", time.Minute, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var root struct {
 		Networks []struct {
-			Name  string           `json:"name"`
-			Hosts []map[string]any `json:"host_table"`
+			Name   string           `json:"name"`
+			Hosts  []map[string]any `json:"host_table"`
+			Leases *int             `json:"active_dhcp_lease_count"`
 		} `json:"network_table"`
 		Leases []map[string]any `json:"ipv4_active_leases"`
 	}
@@ -119,6 +120,21 @@ func TestInventoryClientAssociationAndFlowProjection(t *testing.T) {
 	}
 	if _, exists := hosts[0]["rx_bytes"]; exists {
 		t.Error("rolling window was reported as a lifetime counter")
+	}
+	counted := 0
+	for _, row := range root.Networks {
+		if row.Leases == nil {
+			t.Fatalf("network %s omitted its lease count", row.Name)
+		}
+		counted += *row.Leases
+	}
+	if counted != len(root.Leases) {
+		t.Fatalf("network lease counts total %d, reported %d leases", counted, len(root.Leases))
+	}
+	for _, lease := range root.Leases {
+		if _, ok := lease["leaseExpiry"].(float64); !ok {
+			t.Fatalf("lease %v omitted leaseExpiry", lease)
+		}
 	}
 }
 
@@ -258,7 +274,7 @@ func TestDirectVLANBindingsOverrideParentRoles(t *testing.T) {
 	}
 	id := identity()
 	id.Model = "UXGPRO"
-	b, err := unifi.Render(id, mapping, "", snap, domain.Adoption{}, "", time.Minute)
+	b, err := unifi.Render(id, mapping, "", snap, domain.Adoption{}, "", time.Minute, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
