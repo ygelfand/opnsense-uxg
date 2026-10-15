@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -131,6 +132,22 @@ func desiredVLANFields(vlan domain.VLAN, snap domain.Snapshot) (map[string]any, 
 	}, name, nil
 }
 
+var controllerDefaultWANName = regexp.MustCompile(`^Internet [0-9]+$`)
+
+// controllerDefaultWAN matches the WAN records UniFi 10.6.106 creates when a gateway is adopted into a site without WANs.
+func controllerDefaultWAN(current, wanted map[string]any) bool {
+	name, _ := current["name"].(string)
+	if current["purpose"] != "wan" || !controllerDefaultWANName.MatchString(name) {
+		return false
+	}
+	for k, v := range wanted {
+		if k != "name" && !reflect.DeepEqual(current[k], v) {
+			return false
+		}
+	}
+	return true
+}
+
 func matchesFields(current, wanted map[string]any) bool {
 	for k, v := range wanted {
 		if !reflect.DeepEqual(current[k], v) {
@@ -218,6 +235,7 @@ func (c *Client) Sync(ctx context.Context, snap domain.Snapshot) (domain.Invento
 	}
 	// Validate all ownership/conflicts before the first remote mutation.
 	existing := map[string]map[string]any{}
+	controllerDefaults := map[string]bool{}
 	existingVLANs := map[int]map[string]any{}
 	for _, network := range response.Data {
 		if tag, ok := controllerVLANTag(network); ok {
@@ -250,6 +268,8 @@ func (c *Client) Sync(ctx context.Context, snap domain.Snapshot) (domain.Invento
 			if owned.ID != "" && network["_id"] != owned.ID || !matchesFields(network, owned.Fields) {
 				return domain.InventorySync{}, fmt.Errorf("controller WAN %s has conflicting operator edits", role)
 			}
+		} else if controllerDefaultWAN(network, desired[role]) {
+			controllerDefaults[role] = true
 		} else if !matchesFields(network, desired[role]) {
 			return domain.InventorySync{}, fmt.Errorf("unmanaged controller WAN %s conflicts with source inventory", role)
 		}
@@ -349,7 +369,7 @@ func (c *Client) Sync(ctx context.Context, snap domain.Snapshot) (domain.Invento
 			}
 			state.Networks[role] = OwnedNetwork{ID: id, Fields: fields}
 			result.Created++
-		} else if isOwned {
+		} else if isOwned || controllerDefaults[role] {
 			id, _ := current["_id"].(string)
 			if id == "" {
 				return result, fmt.Errorf("controller WAN has no record ID")

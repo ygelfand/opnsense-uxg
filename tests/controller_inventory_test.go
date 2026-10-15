@@ -260,3 +260,36 @@ func TestControllerInventoryLeavesNativeVLANToDefaultNetwork(t *testing.T) {
 		}
 	}
 }
+
+// Controller records are synthetic and follow the defaults observed after adopting a gateway into an empty site.
+func TestControllerInventoryAdoptsControllerDefaultWAN(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, wanType string
+		adopt         bool
+	}{
+		{"Internet 1", "dhcp", true},
+		{"Home WAN", "dhcp", false},
+		{"Internet 1", "pppoe", false},
+	} {
+		srv := &inventoryServer{networks: []map[string]any{
+			{"_id": "default-wan", "name": tc.name, "purpose": "wan", "wan_networkgroup": "WAN", "wan_type": tc.wanType, "wan_load_balance_type": "weighted", "attr_hidden_id": "WAN"},
+		}}
+		server := httptest.NewServer(srv.handler(t))
+		state := &unifiapi.State{}
+		_, err := inventoryClient(server, state).Sync(t.Context(), inventorySnapshot())
+		server.Close()
+		if !tc.adopt {
+			if err == nil {
+				t.Fatalf("%s/%s: operator WAN was taken over", tc.name, tc.wanType)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if srv.posts != 0 || srv.networks[0]["name"] != "Internet" || srv.networks[0]["wan_load_balance_type"] != "weighted" || state.Networks["WAN"].ID != "default-wan" {
+			t.Fatalf("default WAN not adopted: posts %d network %v state %+v", srv.posts, srv.networks[0], state.Networks)
+		}
+	}
+}
