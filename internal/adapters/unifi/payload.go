@@ -94,6 +94,7 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 		monitors[monitor.Role] = monitor
 	}
 	wanStatus := map[string]string{}
+	macTables := portMACTables(snap)
 	for _, binding := range ordered {
 		observed, ok := interfaces[binding.Interface]
 		if !ok {
@@ -142,6 +143,9 @@ func Render(id domain.Identity, bindings []domain.Binding, uplinkInterface strin
 		port := map[string]any{"port_idx": binding.Port, "name": name, "ifname": name, "networkgroup": strings.ToUpper(binding.Role), "network_name": strings.ToUpper(binding.Role), "type": "wire"}
 		if media := portMedia(id.Model, binding.Port); media != "" {
 			port["media"] = media
+		}
+		if table := macTables[binding.Port]; len(table) > 0 {
+			port["mac_table"] = table
 		}
 		if observed.MAC != "" {
 			port["mac"] = observed.MAC
@@ -473,6 +477,54 @@ func gatewayAddressesFirst(iface string, addresses []string, carp []domain.CARPO
 	}
 	sort.SliceStable(out, func(i, j int) bool { return isVIP(out[i]) && !isVIP(out[j]) })
 	return out
+}
+
+func portMACTables(snap domain.Snapshot) map[int][]map[string]any {
+	tables := map[int][]map[string]any{}
+	for _, client := range snap.Clients {
+		if client.Presence != "observed" || client.Incomplete || client.MAC == "" {
+			continue
+		}
+		age := max(0, int(snap.ObservedAt.Sub(client.LastSeen).Seconds()))
+		entries := map[[2]int]map[string]any{}
+		for _, address := range client.Addresses {
+			if address.Port == 0 || (address.Role != "lan" && address.Role != "lan2") {
+				continue
+			}
+			key := [2]int{address.Port, address.VLAN}
+			entry, exists := entries[key]
+			if !exists {
+				entry = map[string]any{"mac": client.MAC, "age": age}
+				if address.VLAN > 0 {
+					entry["vlan"] = address.VLAN
+				}
+				if client.Hostname != "" {
+					entry["hostname"] = client.Hostname
+				}
+				entries[key] = entry
+			}
+			if ip, err := netip.ParseAddr(address.IP); err == nil && ip.Is4() {
+				if _, has := entry["ip"]; !has {
+					entry["ip"] = ip.String()
+				}
+			}
+		}
+		for key, entry := range entries {
+			tables[key[0]] = append(tables[key[0]], entry)
+		}
+	}
+	for _, table := range tables {
+		sort.Slice(table, func(i, j int) bool {
+			a, b := table[i]["mac"].(string), table[j]["mac"].(string)
+			if a != b {
+				return a < b
+			}
+			va, _ := table[i]["vlan"].(int)
+			vb, _ := table[j]["vlan"].(int)
+			return va < vb
+		})
+	}
+	return tables
 }
 
 // portMedia follows the 10.6.106 uidb link speeds for each model's physical ports.

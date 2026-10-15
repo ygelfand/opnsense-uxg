@@ -162,16 +162,14 @@ func addWANReports(root map[string]any, bindings []domain.Binding, snap domain.S
 	}
 	geo := map[string]any{}
 	for _, provider := range snap.Providers {
-		entry := map[string]any{}
-		if provider.Name != "" {
-			entry["isp_name"] = provider.Name
+		if provider.Name == "" || provider.Organization == "" {
+			continue
 		}
+		entry := map[string]any{"isp_name": provider.Name, "isp_organization": provider.Organization}
 		if provider.ASN != 0 {
 			entry["asn"] = provider.ASN
 		}
-		if len(entry) > 0 {
-			geo[strings.ToUpper(provider.Role)] = entry
-		}
+		geo[strings.ToUpper(provider.Role)] = entry
 	}
 	if len(geo) > 0 {
 		root["geo_info"] = geo

@@ -56,6 +56,7 @@ func (r Resolver) Lookup(ctx context.Context, addr netip.Addr) (domain.Provider,
 	for _, record := range records {
 		if fields := splitFields(record); len(fields) >= 5 && fields[4] != "" {
 			provider.Name = description(fields[4], fields[1])
+			provider.Organization = provider.Name
 			break
 		}
 	}

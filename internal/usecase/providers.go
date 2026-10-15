@@ -60,10 +60,13 @@ func (t *ProviderTracker) Apply(ctx context.Context, snap domain.Snapshot, bindi
 				}
 				t.cache[addr] = cached
 			}
-			provider.Name, provider.ASN = cached.provider.Name, cached.provider.ASN
+			provider.Name, provider.Organization, provider.ASN = cached.provider.Name, cached.provider.Organization, cached.provider.ASN
 		}
 		if name := t.Names[binding.Role]; name != "" {
 			provider.Name = name
+			if provider.Organization == "" {
+				provider.Organization = name
+			}
 		}
 		if provider.Name != "" || provider.ASN != 0 {
 			providers = append(providers, provider)

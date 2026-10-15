@@ -85,9 +85,10 @@ type GatewayMonitor struct {
 
 // Provider names the service provider behind one WAN role.
 type Provider struct {
-	Role string `json:"role"`
-	Name string `json:"name,omitempty"`
-	ASN  uint32 `json:"asn,omitempty"`
+	Role         string `json:"role"`
+	Name         string `json:"name,omitempty"`
+	Organization string `json:"organization,omitempty"`
+	ASN          uint32 `json:"asn,omitempty"`
 }
 
 // ProviderLookup resolves the provider announcing a public address.

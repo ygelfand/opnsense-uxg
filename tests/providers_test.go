@@ -32,7 +32,7 @@ func TestCymruResolverPrefersMostSpecificOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provider.ASN != 64500 || provider.Name != "Example Networks, LLC" || len(queries) != 2 {
+	if provider.ASN != 64500 || provider.Name != "Example Networks, LLC" || provider.Organization != "Example Networks, LLC" || len(queries) != 2 {
 		t.Fatalf("provider = %+v, queries = %v", provider, queries)
 	}
 	if _, err := resolver.Lookup(context.Background(), netip.MustParseAddr("2001:db8::1")); err == nil {
@@ -56,7 +56,7 @@ func TestProviderTrackerCachesLookupsAndPrefersConfiguredNames(t *testing.T) {
 			if addr == failing {
 				return domain.Provider{}, errors.New("timeout")
 			}
-			return domain.Provider{Name: "Looked Up", ASN: 64500}, nil
+			return domain.Provider{Name: "Looked Up", Organization: "Looked Up Org", ASN: 64500}, nil
 		},
 	}
 	bindings := []domain.Binding{{Port: 1, Interface: "lan", Role: "lan"}, {Port: 2, Interface: "wan-a", Role: "wan"}, {Port: 3, Interface: "wan-b", Role: "wan2"}}
@@ -69,7 +69,7 @@ func TestProviderTrackerCachesLookupsAndPrefersConfiguredNames(t *testing.T) {
 	}
 	first := tracker.Apply(context.Background(), snapshot(now, "192.0.2.10/24"), bindings)
 	second := tracker.Apply(context.Background(), snapshot(now.Add(10*time.Second), "192.0.2.10/24"), bindings)
-	want := []domain.Provider{{Role: "wan", Name: "Looked Up", ASN: 64500}, {Role: "wan2", Name: "Configured Provider"}}
+	want := []domain.Provider{{Role: "wan", Name: "Looked Up", Organization: "Looked Up Org", ASN: 64500}, {Role: "wan2", Name: "Configured Provider", Organization: "Configured Provider"}}
 	for _, got := range [][]domain.Provider{first.Providers, second.Providers} {
 		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 			t.Fatalf("providers = %+v", got)
@@ -98,7 +98,7 @@ func TestProvidersRenderAsGeoInfoByWANGroup(t *testing.T) {
 	id := identity()
 	bindings := []domain.Binding{{Port: 1, Interface: "wan-a", Role: "wan"}}
 	snap := domain.Snapshot{SourceID: id.ID, ObservedAt: time.Now(), Interfaces: []domain.Interface{{Name: "wan-a"}},
-		Providers: []domain.Provider{{Role: "wan", Name: "Example Networks, LLC", ASN: 64500}}}
+		Providers: []domain.Provider{{Role: "wan", Name: "Example Networks", Organization: "Example Networks, LLC", ASN: 64500}, {Role: "wan2", Name: "Unverified", ASN: 64501}}}
 	b, err := unifi.Render(id, bindings, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestProvidersRenderAsGeoInfoByWANGroup(t *testing.T) {
 	if err := json.Unmarshal(b, &root); err != nil {
 		t.Fatal(err)
 	}
-	if wan := root.GeoInfo["WAN"]; wan["isp_name"] != "Example Networks, LLC" || wan["asn"] != float64(64500) || len(root.GeoInfo) != 1 {
+	if wan := root.GeoInfo["WAN"]; wan["isp_name"] != "Example Networks" || wan["isp_organization"] != "Example Networks, LLC" || wan["asn"] != float64(64500) || len(root.GeoInfo) != 1 {
 		t.Fatalf("geo_info = %v", root.GeoInfo)
 	}
 }
