@@ -23,7 +23,7 @@ func TestDualWANReportsKeepUnknownAndDisconnectedDistinct(t *testing.T) {
 		{Name: "wan-a", Up: &link, Addresses: []string{"192.0.2.2/24"}, Counters: domain.Counters{RXBytes: &bytes}, Rates: domain.Rates{RXBytesPerSecond: &rate}},
 		{Name: "wan-b", Addresses: []string{"198.51.100.2/24", "2001:db8::2/64"}},
 	}, Gateways: []domain.GatewayMonitor{{Role: "wan", Connected: &connected, LatencyMS: &latency}},
-		WANHistory: []domain.WANHistory{{Role: "wan", OfflineSeconds: 45}}}
+		WANHistory: []domain.WANHistory{{Role: "wan", StreakSeconds: 45, OfflineSeconds: 300}}}
 	b, err := unifi.Render(id, bindings, "", snap, domain.Adoption{}, "https://192.0.2.100/inform", time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestDualWANReportsKeepUnknownAndDisconnectedDistinct(t *testing.T) {
 	}
 	health := root["uptime_stats"].(map[string]any)
 	firstHealth := health["WAN"].(map[string]any)
-	if firstHealth["uptime"] != float64(0) || firstHealth["downtime"] != float64(45) || firstHealth["alerting_monitors"].([]any)[0].(map[string]any)["latency_average"] != float64(0) {
+	if _, exists := firstHealth["uptime"]; exists || firstHealth["downtime"] != float64(45) || firstHealth["alerting_monitors"].([]any)[0].(map[string]any)["latency_average"] != float64(0) {
 		t.Fatal("disconnected monitor did not report measured controller health")
 	}
 	if _, exists := health["WAN2"]; exists {
@@ -142,13 +142,13 @@ func TestWANMonitorHealthProjectsCurrentProbeResults(t *testing.T) {
 			t.Fatal(err)
 		}
 		health := root["uptime_stats"].(map[string]any)["WAN"].(map[string]any)
-		want, uptime := 0.0, 0.0
+		want, present, absent := 0.0, "downtime", "uptime"
 		if connected {
-			want, uptime = 98, 120
+			want, present, absent = 98, "uptime", "downtime"
 		}
 		probe := health["alerting_monitors"].([]any)[0].(map[string]any)
-		if health["uptime"] != uptime || health["downtime"] != float64(30) || health["availability"] != want || probe["availability"] != want || probe["latency_average"] != latency {
-			t.Fatal("current WAN probe health was not projected correctly")
+		if _, exists := health[absent]; exists || health[present] != float64(120) || health["availability"] != want || probe["availability"] != want || probe["latency_average"] != latency {
+			t.Fatalf("current WAN probe health was not projected correctly: %v", health)
 		}
 	}
 }
@@ -179,7 +179,7 @@ func TestNetworkTableReportsCARPAddressFirst(t *testing.T) {
 	}
 }
 
-func TestWANStreakCountsOnlyMeasuredContinuousUptime(t *testing.T) {
+func TestWANStreakCountsMeasuredTimeInCurrentState(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	tracker := usecase.WANTracker{MaxGap: time.Minute}
@@ -196,7 +196,7 @@ func TestWANStreakCountsOnlyMeasuredContinuousUptime(t *testing.T) {
 		{10 * time.Second, true, 10, 0},
 		{20 * time.Second, true, 20, 0},
 		{30 * time.Second, false, 0, 0},
-		{40 * time.Second, false, 0, 10},
+		{40 * time.Second, false, 10, 10},
 		{50 * time.Second, true, 0, 20},
 		{60 * time.Second, true, 10, 20},
 		{200 * time.Second, true, 10, 20},
@@ -225,7 +225,7 @@ func TestConnectedWANReportsPositiveUptimeAtStreakStart(t *testing.T) {
 	if err := json.Unmarshal(b, &root); err != nil {
 		t.Fatal(err)
 	}
-	if root.Health["WAN"]["uptime"] != float64(1) || root.Health["WAN"]["downtime"] != float64(12) {
+	if _, exists := root.Health["WAN"]["downtime"]; exists || root.Health["WAN"]["uptime"] != float64(1) {
 		t.Fatalf("uptime_stats = %v", root.Health["WAN"])
 	}
 }

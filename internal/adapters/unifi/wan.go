@@ -119,16 +119,16 @@ func addWANReports(root map[string]any, bindings []domain.Binding, snap domain.S
 				}
 				percent := int(math.Round(availability))
 				result := map[string]any{"availability": percent}
-				// UniFi 10.6.106 stores uptime and downtime as per-interval increases of cumulative seconds.
+				// UniFi 10.6.106 raises WAN failed on downtime > 6 and restored on any uptime key.
 				for _, history := range snap.WANHistory {
 					if history.Role != binding.Role {
 						continue
 					}
-					uptime := 0
 					if *monitor.Connected {
-						uptime = max(1, int(history.StreakSeconds))
+						result["uptime"] = max(1, int(history.StreakSeconds))
+					} else {
+						result["downtime"] = int(history.StreakSeconds)
 					}
-					result["uptime"], result["downtime"] = uptime, int(history.OfflineSeconds)
 				}
 				probe := map[string]any{"availability": percent}
 				if monitor.LatencyMS != nil {

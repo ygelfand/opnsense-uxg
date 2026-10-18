@@ -35,6 +35,7 @@ func (t *WANTracker) Apply(snap domain.Snapshot) domain.Snapshot {
 				row.StreakSeconds += seconds
 			default:
 				row.OfflineSeconds += seconds
+				row.StreakSeconds += seconds
 			}
 			if next != nil && row.Connected != nil && *next != *row.Connected {
 				row.LastChangeAt = snap.ObservedAt
@@ -43,7 +44,7 @@ func (t *WANTracker) Apply(snap domain.Snapshot) domain.Snapshot {
 				}
 			}
 		}
-		if next == nil || !*next {
+		if next == nil || row.Connected == nil || *next != *row.Connected {
 			row.StreakSeconds = 0
 		}
 		row.Connected = nil

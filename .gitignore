@@ -7,3 +7,4 @@
 *.local.yaml
 /go.work
 /go.work.sum
+/.scratch/
