@@ -83,7 +83,7 @@ func TestApplianceTelemetryAndWANProjection(t *testing.T) {
 	if err := json.Unmarshal(b, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["uptime"] != float64(183845) || payload["version"] != "5.1.26.33914" {
+	if payload["uptime"] != float64(183845) || payload["version"] != "5.1.34.34103" {
 		t.Errorf("wire identity/uptime = %v/%v", payload["version"], payload["uptime"])
 	}
 	usage := payload["system-stats"].(map[string]any)
