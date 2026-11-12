@@ -15,7 +15,7 @@ import (
 	"github.com/ygelfand/opnsense-uxg/internal/domain"
 )
 
-const gatewayFirmwareVersion = "5.1.35.34108"
+const gatewayFirmwareVersion = "6.0.17.36539"
 
 type interfaceRow struct {
 	Name          string `json:"name"`
